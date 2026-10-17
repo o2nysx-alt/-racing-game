@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#111827">
+<title>極速狂飆｜賽車遊戲</title>
+<style>
+*{box-sizing:border-box}body{margin:0;padding:16px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#101827;color:#f8fafc;display:flex;justify-content:center}
+main{width:min(100%,430px)}.hud{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font-weight:800;margin:4px 0 12px}
+.game{position:relative;width:100%;overflow:hidden;border-radius:16px;background:#111827;box-shadow:0 12px 35px #0005}
+canvas{display:block;width:100%;height:auto;touch-action:pan-y}
+.overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:#07111dcc;text-align:center;color:white;padding:18px}
+.overlay[hidden]{display:none}.overlay-box{max-width:300px}.overlay h2{font-size:25px;margin:8px 0}.overlay p{font-size:14px;line-height:1.6}
+button{min-height:48px;border:1px solid #475569;border-radius:12px;padding:10px 14px;font-size:16px;font-weight:800;background:#263449;color:#fff;touch-action:manipulation}
+button:active{filter:brightness(1.2)}.start{background:#e34e35;border:0;margin-top:12px}.controls{display:grid;grid-template-columns:1fr 1fr 1fr;gap:9px;margin-top:12px}.actions{display:flex;gap:9px;margin-top:9px}.actions button{flex:1}.hint{font-size:13px;line-height:1.5;color:#cbd5e1;margin-top:12px}
+</style>
+</head>
+<body>
+<main id="game">
+  <div class="hud"><span>🏁 極速狂飆</span><span>分數：<span id="score">0</span></span><span>最高：<span id="best">0</span></span></div>
+  <div class="game">
+    <canvas id="canvas" width="360" height="540" aria-label="賽車遊戲畫面，躲避道路上的其他車輛"></canvas>
+    <div id="overlay" class="overlay">
+      <div class="overlay-box"><div style="font-size:42px">🏎️</div><h2 id="title">準備好上賽道了嗎？</h2>
+      <p id="desc">躲開其他車輛，收集分數！<br>撞車就會結束遊戲。</p><button id="start" class="start">開始比賽 ▶</button></div>
+    </div>
+  </div>
+  <div class="controls">
+    <button id="left">⬅️ 左轉</button><button id="boost">⚡ 加速</button><button id="right">右轉 ➡️</button>
+  </div>
+  <div class="actions"><button id="pause">⏸ 暫停</button><button id="restart">↻ 重新開始</button></div>
+  <p class="hint">操作：按左右按鈕移動、按住「加速」加快速度。電腦也可使用 ← → 方向鍵與 ↑ 加速。避開來車，挑戰最高分！</p>
+</main>
+<script>
+(() => {
+  const canvas=document.getElementById('canvas'),ctx=canvas.getContext('2d');
+  const overlay=document.getElementById('overlay'),title=document.getElementById('title'),desc=document.getElementById('desc'),startBtn=document.getElementById('start');
+  const scoreEl=document.getElementById('score'),bestEl=document.getElementById('best');
+  const W=360,H=540,lanes=[108,180,252];
+  let state='ready',playerX=180,traffic=[],score=0,best=0,speed=3,roadOffset=0,spawn=0,last=0,raf=0;
+  const keys={},held={left:false,right:false,boost:false};
+  function car(x,y,color,player=false){
+    ctx.save();ctx.translate(x,y);
+    ctx.fillStyle='#0008';ctx.beginPath();ctx.ellipse(2,14,18,29,0,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='#171b24';ctx.fillRect(-17,-25,6,15);ctx.fillRect(11,-25,6,15);ctx.fillRect(-17,15,6,15);ctx.fillRect(11,15,6,15);
+    ctx.fillStyle=color;ctx.beginPath();ctx.moveTo(-12,-27);ctx.quadraticCurveTo(-17,-22,-17,-8);ctx.lineTo(-15,23);ctx.quadraticCurveTo(-13,29,-8,29);ctx.lineTo(8,29);ctx.quadraticCurveTo(15,28,15,20);ctx.lineTo(16,-10);ctx.quadraticCurveTo(15,-24,10,-27);ctx.closePath();ctx.fill();
+    ctx.fillStyle=player?'#a5f3fc':'#dbeafe';ctx.beginPath();ctx.moveTo(-10,-17);ctx.lineTo(9,-17);ctx.lineTo(12,-4);ctx.lineTo(-12,-4);ctx.closePath();ctx.fill();
+    ctx.fillStyle='#263b52';ctx.fillRect(-11,2,22,10);ctx.fillStyle='#fff4bf';ctx.fillRect(-13,20,6,4);ctx.fillRect(7,20,6,4);
+    if(player){ctx.fillStyle='#38bdf8';ctx.fillRect(-3,-27,6,5)}ctx.restore();
+  }
+  function draw(){
+    ctx.clearRect(0,0,W,H);
+    const sky=ctx.createLinearGradient(0,0,0,H);sky.addColorStop(0,'#172f37');sky.addColorStop(1,'#29473d');ctx.fillStyle=sky;ctx.fillRect(0,0,W,H);
+    ctx.fillStyle='#385d42';for(let y=-30;y<H;y+=75){const yy=y+roadOffset%75;ctx.fillRect(0,yy,42,28);ctx.fillRect(318,yy,42,28)}
+    ctx.fillStyle='#b7b7b7';ctx.fillRect(47,0,5,H);ctx.fillRect(309,0,5,H);ctx.fillStyle='#34383f';ctx.fillRect(52,0,257,H);
+    ctx.fillStyle='#e5e7eb';for(let y=-50;y<H;y+=65){const yy=y+roadOffset%65;ctx.fillRect(133,yy,4,34);ctx.fillRect(223,yy,4,34)}
+    traffic.forEach(t=>car(t.x,t.y,t.color));car(playerX,450,'#ed493e',true);
+    if(state==='running'&&speed>5){ctx.strokeStyle='#ffffff35';ctx.lineWidth=2;for(let i=0;i<9;i++){const x=(i*47+Math.floor(roadOffset*3))%300+30,y=(i*83+Math.floor(roadOffset*4))%H;ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x,y+15);ctx.stroke()}}
+  }
+  function reset(){playerX=180;traffic=[];score=0;speed=3;roadOffset=0;spawn=0;scoreEl.textContent='0';state='running';overlay.hidden=true;last=performance.now();cancelAnimationFrame(raf);raf=requestAnimationFrame(loop)}
+  function end(){state='over';best=Math.max(best,score);bestEl.textContent=best;try{localStorage.setItem('racerBest',String(best))}catch(e){}title.textContent='💥 比賽結束！';desc.innerHTML='你的分數：<b>'+score+'</b><br>最高紀錄：<b>'+best+'</b><br>再挑戰一次，突破自己的紀錄！';startBtn.textContent='再次挑戰 ↻';overlay.hidden=false}
+  function loop(now){
+    if(state!=='running'){draw();return}
+    const dt=Math.min((now-last)/16.67,2);last=now;
+    const boosting=held.boost||keys.ArrowUp||keys.w||keys.W;speed=boosting?6.5:3.5;roadOffset=(roadOffset+speed*dt)%65;score+=Math.max(0,Math.floor(speed*dt/3));scoreEl.textContent=score;
+    const steer=(held.left||keys.ArrowLeft||keys.a||keys.A?-1:0)+(held.right||keys.ArrowRight||keys.d||keys.D?1:0);
+    playerX=Math.max(72,Math.min(288,playerX+steer*4.5*dt));spawn+=dt;
+    if(spawn>Math.max(24,57-score/30)){spawn=0;const lane=lanes[Math.floor(Math.random()*lanes.length)];traffic.push({x:lane+(Math.random()-.5)*7,y:-45,color:['#fbbf24','#60a5fa','#a78bfa','#f8fafc','#34d399'][Math.floor(Math.random()*5)]})}
+    traffic.forEach(t=>t.y+=speed*dt*(t.y<120?.92:1));traffic=traffic.filter(t=>t.y<H+45);
+    for(const t of traffic){if(Math.abs(t.x-playerX)<27&&Math.abs(t.y-450)<45){draw();end();return}}
+    draw();raf=requestAnimationFrame(loop);
+  }
+  function showPause(){title.textContent='⏸ 比賽暫停';desc.textContent='休息一下，準備好就繼續！';startBtn.textContent='繼續比賽 ▶';overlay.hidden=false}
+  startBtn.addEventListener('click',()=>{if(state==='paused'){state='running';overlay.hidden=true;last=performance.now();raf=requestAnimationFrame(loop)}else reset()});
+  document.getElementById('restart').addEventListener('click',reset);
+  document.getElementById('pause').addEventListener('click',()=>{if(state==='running'){state='paused';cancelAnimationFrame(raf);showPause()}else if(state==='paused'){state='running';overlay.hidden=true;last=performance.now();raf=requestAnimationFrame(loop)}else reset()});
+  function bind(id,key){const b=document.getElementById(id);b.addEventListener('pointerdown',e=>{e.preventDefault();held[key]=true});for(const ev of ['pointerup','pointercancel','pointerleave'])b.addEventListener(ev,()=>held[key]=false)}
+  bind('left','left');bind('right','right');bind('boost','boost');
+  document.addEventListener('keydown',e=>{if(['ArrowLeft','ArrowRight','ArrowUp',' '].includes(e.key))e.preventDefault();keys[e.key]=true;if(e.key===' '&&state==='running'){state='paused';cancelAnimationFrame(raf);showPause()}else if(e.key===' '&&state==='paused'){state='running';overlay.hidden=true;last=performance.now();raf=requestAnimationFrame(loop)}});
+  document.addEventListener('keyup',e=>keys[e.key]=false);window.addEventListener('blur',()=>{Object.keys(keys).forEach(k=>keys[k]=false);Object.keys(held).forEach(k=>held[k]=false)});
+  try{best=Number(localStorage.getItem('racerBest')||0)}catch(e){}bestEl.textContent=best;draw();
+})();
+</script>
+</body>
+</html>
